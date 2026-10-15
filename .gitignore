@@ -1,0 +1,27 @@
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+coverage/
+.npm/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+
+# Env files
+.env
+.env.*
+!.env.example
+
+# Local database and temp files
+*.local
+*.log
