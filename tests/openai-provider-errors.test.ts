@@ -2,6 +2,7 @@
 
 import {
   extractTaskProposals,
+  AIResponseError,
   GoogleGeminiAPIError,
   mapGoogleGeminiError,
   mapOpenAIError,
@@ -17,6 +18,78 @@ describe('OpenAI provider error handling', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    vi.useRealTimers();
+  });
+
+  it('discards a provider-invented due date when the input has no date', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubEnv('AI_MODEL', 'gpt-4o-mini');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        tasks: [{ title: 'Draft the proposal', priority: 'medium', dueDate: '2026-10-20' }],
+      }) } }],
+    }), { status: 200 })));
+
+    const proposals = await extractTaskProposals('Draft the proposal', 'UTC');
+
+    expect(proposals).toEqual([{ title: 'Draft the proposal', priority: 'medium', dueDate: null }]);
+  });
+
+  it('does not call OpenAI when its API key is missing', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', '');
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(extractTaskProposals('Draft the proposal', 'UTC')).rejects.toThrow('OPENAI_API_KEY');
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed OpenAI task output', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubEnv('AI_MODEL', 'gpt-4o-mini');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{invalid json' } }],
+    }), { status: 200 })));
+
+    await expect(extractTaskProposals('Draft the proposal', 'UTC')).rejects.toBeInstanceOf(AIResponseError);
+  });
+
+  it('resolves a supported relative date and drops ambiguous numeric dates', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-17T12:00:00.000Z'));
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubEnv('AI_MODEL', 'gpt-4o-mini');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          tasks: [{ title: 'Submit report', priority: 'high', dueDate: '2026-10-18' }],
+        }) } }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          tasks: [{ title: 'Schedule follow-up', priority: 'medium', dueDate: '2026-03-04' }],
+        }) } }],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        choices: [{ message: { content: JSON.stringify({
+          tasks: [{ title: 'Finish draft', priority: 'high', dueDate: '2026-11-02' }],
+        }) } }],
+      }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const tomorrow = await extractTaskProposals('Submit report by tomorrow', 'UTC');
+    const ambiguous = await extractTaskProposals('Schedule follow-up for 03/04/2026', 'UTC');
+    const explicit = await extractTaskProposals('Finish draft on November 2, 2026', 'UTC');
+
+    expect(tomorrow[0].dueDate).toBe('2026-10-18');
+    expect(ambiguous[0].dueDate).toBeNull();
+    expect(explicit[0].dueDate).toBe('2026-11-02');
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it.each([

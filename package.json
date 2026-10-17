@@ -2,7 +2,7 @@
   "name": "lifeos",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "set \"NODE_OPTIONS=--require=%CD%\\dns-preload.cjs %NODE_OPTIONS%\" && next dev",
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
