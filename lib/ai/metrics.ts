@@ -1,4 +1,4 @@
-export type AIOperation = 'task_extraction' | 'task_prioritization';
+export type AIOperation = 'task_extraction' | 'task_prioritization' | 'weekly_report' | 'daily_planning';
 export type AIProvider = 'google' | 'openai';
 
 export type AIOperationMetric = {

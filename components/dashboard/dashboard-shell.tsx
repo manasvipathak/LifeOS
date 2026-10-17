@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { signOut } from 'next-auth/react';
-import { BarChart3, CalendarDays, Heart, LayoutDashboard, ListTodo, LogOut, NotebookPen, Settings, UserCircle2 } from 'lucide-react';
+import { BarChart3, CalendarCheck2, CalendarDays, Heart, LayoutDashboard, ListTodo, LogOut, NotebookPen, Settings, Sparkles, UserCircle2 } from 'lucide-react';
 
 const navigation = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
@@ -12,6 +12,8 @@ const navigation = [
   { href: '/dashboard/journal', label: 'Journal', icon: NotebookPen },
   { href: '/dashboard/mood', label: 'Mood Tracking', icon: Heart },
   { href: '/dashboard/analytics', label: 'Analytics', icon: BarChart3 },
+  { href: '/dashboard/weekly-report', label: 'Weekly AI Report', icon: Sparkles },
+  { href: '/dashboard/daily-planner', label: 'Daily Planner', icon: CalendarCheck2 },
   { href: '/dashboard/settings', label: 'Settings', icon: Settings },
 ];
 

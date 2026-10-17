@@ -29,7 +29,7 @@ MONGODB_DB_NAME=lifeos
 
 Use one stable Auth.js secret for local sessions and a separately managed stable secret per deployed environment. Do not rotate it casually; existing sessions depend on it. Generate a secret locally with `node -p "require('node:crypto').randomBytes(32).toString('base64url')"`.
 
-The supported optional AI settings are `AI_PROVIDER` (`openai` or `google`), `AI_MODEL` and `OPENAI_API_KEY` for OpenAI, or `GEMINI_MODEL` and `GOOGLE_API_KEY` for Gemini. The defaults are OpenAI and `gpt-4o-mini`; Gemini defaults to the configured model in the service. Keys are read on the server only and must not use a `NEXT_PUBLIC_` prefix. Without the selected provider's key, baseline prioritization and non-AI features remain available, while AI calls return a configuration error. Restart the server after changing environment variables.
+The supported optional AI settings are `AI_PROVIDER` (`openai` or `google`), `AI_MODEL` and `OPENAI_API_KEY` for OpenAI, or `GEMINI_MODEL` and `GOOGLE_API_KEY` for Gemini. The defaults are OpenAI and `gpt-4o-mini`; Gemini defaults to the configured model in the service. Keys are read on the server only and must not use a `NEXT_PUBLIC_` prefix. Without the selected provider's key, baseline prioritization and non-AI features remain available; extraction and optional LLM prioritization return a configuration error, while weekly-report and daily-planner requests use their deterministic fallback. Restart the server after changing environment variables.
 
 ## Architecture and data boundaries
 
@@ -40,10 +40,14 @@ flowchart LR
   Routes -->|owner-scoped queries| Mongo[(MongoDB / Mongoose)]
   Routes --> Extract[AI task extraction]
   Routes --> Rules[Rules-based priority baseline]
+  Routes --> Report[Weekly report statistics]
+  Routes --> Planner[Daily deterministic scheduler]
   Routes -. optional, explicit .-> Provider[OpenAI or Gemini]
   Extract -->|strict Zod validation| Proposals[Reviewable proposals]
   Proposals -->|user explicitly saves| Mongo
   Rules --> Suggestions[Recommendations only]
+  Report -->|aggregate counts only| Provider
+  Planner -->|schedule counts only| Provider
   Provider -->|validated, no auto-save| Suggestions
 ```
 
@@ -53,6 +57,10 @@ flowchart LR
 - AI extraction returns proposals; it does not create tasks. The UI requires review and explicit save.
 - Task prioritization returns baseline suggestions and optionally an LLM comparison. Neither result changes stored task priorities; user approval and a separate task update are required.
 - The current Task schema has no effort field. Prioritization therefore uses only selected priority, due date, and status; it does not infer effort.
+- The weekly report queries only the authenticated user's tasks, journal timestamps, and mood values. Journal titles/content and mood notes are not sent to the AI provider. Database metrics are deterministic; AI selects only from fact-eligible, server-rendered insight themes.
+- Completion trends use the task model's `completedAt` timestamps. Current open/overdue/priority counts are snapshots, not reconstructions of historical task state; older records without completion timestamps cannot contribute to the completion trend.
+- The daily planner reads only the authenticated user's incomplete tasks and creates a schedule in memory. Availability is supplied for that request; there are no persisted task durations or separate calendar-event model/integration. A blank task duration is a 30-minute assumption. Nothing is saved or applied.
+- Reports use UTC day boundaries, a Monday start, and at most one year of history. Daily planning considers at most 100 open tasks, allows a 30–720-minute planning window, and times out provider requests after 15 seconds.
 
 ## MongoDB setup and network access
 
@@ -73,6 +81,23 @@ npm run build
 ```
 
 The automated tests use mocked providers and database models; they do not require MongoDB, network access, or paid AI calls. They verify selected API, validation, ownership, and service behavior, but are not proof of live Atlas persistence, real authentication deployment, or provider availability. No browser automation suite or live-service integration suite is currently part of `npm test`.
+
+## Weekly AI Life Report and Daily Planner
+
+- `POST /api/ai/weekly-report` requires an authenticated session and a strict `{ "weekStart": "YYYY-MM-DD" }` body where the date is a Monday within the last year. The server calculates task completion-by-day, current open/overdue counts, current priority counts, journal-entry counts by day, and mood-value counts for the period and previous seven days. Private journal content and mood notes are excluded. Statistics are visibly distinguished from AI-guided suggestions; if AI is unconfigured or unavailable, grounded rules-based suggestions are returned.
+- `GET /api/ai/daily-plan` requires authentication and returns up to 100 open tasks belonging to that user for duration entry. `POST /api/ai/daily-plan` requires `{ "planDate": "YYYY-MM-DD", "startTime": "HH:MM", "availableMinutes": 30..720, "breakMinutes"?: 5..30, "taskDurations"?: [{ "taskId": "<owned task id>", "minutes": 10..240 }], "includeAI"?: boolean }`. The server reloads only owner-scoped incomplete tasks, checks supplied duration IDs against that list, uses a labelled 30-minute assumption for durations not entered, and creates a review-only proposal. Task names are returned to the same user but are not sent to the AI provider; optional AI guidance uses schedule counts only.
+- The planner orders by overdue/earliest deadlines, then selected priority and in-progress status; it schedules breaks after up to 60 minutes of focus, flags overdue/due-today conflicts, and lists work that does not fit. Existing due dates and calendar data are never changed. The current calendar displays task deadlines only; there is no separate event integration or reliable availability source.
+- Provider suggestions are structured enum selections mapped to fixed, count-grounded copy. This intentionally limits free-form model assertions and is not a trained ML model. Provider errors fall back to the deterministic plan/report; unexpected server errors return generic responses.
+- Both endpoints currently have bounded request/task sizes and a provider timeout but no distributed per-user rate limiter. Add a deployment-level rate limit or abuse control before accepting high-volume public traffic.
+
+Run the synthetic Phase 2 deterministic evaluation:
+
+```powershell
+npm run evaluate:phase2
+npm run evaluate
+```
+
+`data/evaluation/weekly-report-and-daily-planner-synthetic.json` includes empty reports, completions, overdue work, missing durations, deadline conflicts, tasks that do not fit, and break scheduling. The evaluation checks computed facts, schema constraints through unit tests, schedule capacity, deadlines, and fallback behavior. These are deterministic fixture pass/fail checks, not subjective quality scores or live-model results. `npm run evaluate` combines the rules-based priority benchmark with the Phase 2 fixture checks. `npm run evaluate:ai` for extraction still requires observed model predictions; it does not make API calls itself.
 
 ## AI extraction evaluation
 

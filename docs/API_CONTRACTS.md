@@ -326,9 +326,28 @@
   - confirm the task belongs to the current user before calling the provider
   - show tasks for review before persisting
 
-## 8. AI daily planning
+## 8. Weekly AI Life Report and Daily Planner
 
-### Suggest daily plan
+### Generate a weekly report
+
+- Method: `POST`
+- Route: `/api/ai/weekly-report`
+- Authentication: required
+- Request body: `{ "weekStart": "YYYY-MM-DD" }`, with a Monday date within the last year
+- Response shape: `{ report: { period, generatedAt, tasks, journal, mood, interpretation } }`
+- `tasks` and `journal` contain deterministic database counts and daily series. `mood` is `null` unless the current report period contains recorded mood check-ins; when present it contains only selected-value counts for this and the previous period.
+- `interpretation.source` is `ai_guided` or `rules_fallback`. AI receives aggregate task and journal counts only; journal text, titles, mood values, and mood notes are not sent to the provider. AI chooses from eligible insight codes and the server renders grounded copy.
+- The report shows the selected Monday-to-Sunday period (or current week to date), UTC date boundaries, and separates current task-state snapshots from period counts.
+
+### List open tasks for a daily plan
+
+- Method: `GET`
+- Route: `/api/ai/daily-plan`
+- Authentication: required
+- Response shape: `{ tasks: PlannerTask[], taskLimitHit: boolean, timezone: string, today: string }`
+- Returns at most 100 current-user tasks whose status is `todo` or `in_progress`. No owner IDs or private fields are returned.
+
+### Build a review-only daily plan
 
 - Method: `POST`
 - Route: `/api/ai/daily-plan`
@@ -337,27 +356,19 @@
 
 ```ts
 {
-  date: string;
-  timezone?: string;
+  planDate: string; // YYYY-MM-DD, today through 14 days ahead
+  startTime: string; // HH:MM in the authenticated user's profile timezone
+  availableMinutes: number; // 30–720, includes breaks
+  breakMinutes?: number; // 5–30, defaults to 10
+  taskDurations?: Array<{ taskId: string; minutes: number }>; // owned IDs only; 10–240
+  includeAI?: boolean; // defaults to true; false returns the deterministic baseline
 }
 ```
 
-- Response:
-
-```ts
-{
-  plan: Array<{
-    taskId?: string;
-    title: string;
-    reason?: string;
-    suggestedOrder: number;
-  }>;
-}
-```
-
-- Behavior:
-  - suggestions are generated from the user’s incomplete tasks and deadlines
-  - the UI must clearly distinguish a suggestion from a saved schedule change
+- Response shape: `{ plan: { schedule, scheduledTaskIds, notScheduled, deadlineConflicts, ... }, interpretation }`
+- The server reloads all scheduled tasks using the authenticated user's ID. Durations omitted by the user use a labelled 30-minute estimate. The schedule is deterministic, inserts breaks after up to 60 focused minutes, and reports overdue/due-today conflicts and tasks that do not fit.
+- The provider receives schedule counts only, not task names or IDs. Provider failures fall back to rules-based suggestions. The proposal is never persisted and does not update task deadlines or calendar events.
+- The application has no persisted availability/effort field or separate calendar-event integration. These endpoints currently have no distributed per-user rate limiter.
 
 ## 9. Journal endpoints
 

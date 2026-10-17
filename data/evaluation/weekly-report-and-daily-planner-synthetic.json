@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "description": "Synthetic fixtures for deterministic weekly-report facts and daily-plan feasibility. No journal text, mood notes, or production data is included. These fixtures do not score subjective AI quality.",
+  "weeklyReportCases": [
+    {
+      "id": "report-empty",
+      "facts": { "completedInPeriod": 0, "openNow": 0, "overdueNow": 0, "journalEntriesInPeriod": 0 },
+      "expected": { "wins": 0, "bottlenecks": 0, "hasRealisticSuggestion": true }
+    },
+    {
+      "id": "report-completion-overdue-journal",
+      "facts": { "completedInPeriod": 4, "openNow": 3, "overdueNow": 1, "journalEntriesInPeriod": 2 },
+      "expected": { "wins": 1, "bottlenecks": 1, "hasRealisticSuggestion": true }
+    },
+    {
+      "id": "report-open-without-overdue",
+      "facts": { "completedInPeriod": 0, "openNow": 6, "overdueNow": 0, "journalEntriesInPeriod": 0 },
+      "expected": { "wins": 0, "bottlenecks": 1, "hasRealisticSuggestion": true }
+    }
+  ],
+  "dailyPlannerCases": [
+    {
+      "id": "plan-empty",
+      "input": { "planDate": "2026-01-19", "startTime": "09:00", "availableMinutes": 120, "breakMinutes": 10, "timezone": "UTC" },
+      "tasks": [],
+      "expected": { "scheduledTaskIds": [], "workMinutes": 0, "breakMinutes": 0, "overdueCount": 0, "dueTodayCount": 0, "notScheduledIds": [], "deadlineConflictIds": [] }
+    },
+    {
+      "id": "plan-overdue-before-due-today",
+      "input": { "planDate": "2026-01-19", "startTime": "09:00", "availableMinutes": 120, "breakMinutes": 10, "timezone": "UTC" },
+      "tasks": [
+        { "taskId": "64b000000000000000000002", "title": "Due today", "priority": "high", "status": "todo", "dueDate": "2026-01-19", "createdAt": "2026-01-01T00:00:00.000Z", "durationMinutes": 30, "durationAssumed": false },
+        { "taskId": "64b000000000000000000001", "title": "Overdue task", "priority": "low", "status": "todo", "dueDate": "2026-01-18", "createdAt": "2026-01-02T00:00:00.000Z", "durationMinutes": 40, "durationAssumed": false }
+      ],
+      "expected": { "scheduledTaskIds": ["64b000000000000000000001", "64b000000000000000000002"], "workMinutes": 70, "breakMinutes": 10, "overdueCount": 1, "dueTodayCount": 1, "notScheduledIds": [], "deadlineConflictIds": ["64b000000000000000000001"] }
+    },
+    {
+      "id": "plan-unestimated-duration",
+      "input": { "planDate": "2026-01-19", "startTime": "10:00", "availableMinutes": 45, "breakMinutes": 10, "timezone": "UTC" },
+      "tasks": [
+        { "taskId": "64b000000000000000000003", "title": "Task with assumed duration", "priority": "medium", "status": "todo", "dueDate": null, "createdAt": "2026-01-01T00:00:00.000Z", "durationMinutes": 30, "durationAssumed": true }
+      ],
+      "expected": { "scheduledTaskIds": ["64b000000000000000000003"], "workMinutes": 30, "breakMinutes": 0, "overdueCount": 0, "dueTodayCount": 0, "notScheduledIds": [], "deadlineConflictIds": [], "assumedDuration": true }
+    },
+    {
+      "id": "plan-task-does-not-fit",
+      "input": { "planDate": "2026-01-19", "startTime": "09:00", "availableMinutes": 30, "breakMinutes": 10, "timezone": "UTC" },
+      "tasks": [
+        { "taskId": "64b000000000000000000004", "title": "Long task", "priority": "high", "status": "in_progress", "dueDate": "2026-01-19", "createdAt": "2026-01-01T00:00:00.000Z", "durationMinutes": 60, "durationAssumed": false }
+      ],
+      "expected": { "scheduledTaskIds": [], "workMinutes": 0, "breakMinutes": 0, "overdueCount": 0, "dueTodayCount": 1, "notScheduledIds": ["64b000000000000000000004"], "deadlineConflictIds": ["64b000000000000000000004"] }
+    },
+    {
+      "id": "plan-break-after-focused-work",
+      "input": { "planDate": "2026-01-19", "startTime": "09:00", "availableMinutes": 130, "breakMinutes": 10, "timezone": "UTC" },
+      "tasks": [
+        { "taskId": "64b000000000000000000005", "title": "Long task", "priority": "high", "status": "in_progress", "dueDate": null, "createdAt": "2026-01-01T00:00:00.000Z", "durationMinutes": 75, "durationAssumed": false },
+        { "taskId": "64b000000000000000000006", "title": "Short task", "priority": "medium", "status": "todo", "dueDate": null, "createdAt": "2026-01-02T00:00:00.000Z", "durationMinutes": 20, "durationAssumed": false }
+      ],
+      "expected": { "scheduledTaskIds": ["64b000000000000000000005", "64b000000000000000000006"], "workMinutes": 95, "breakMinutes": 10, "overdueCount": 0, "dueTodayCount": 0, "notScheduledIds": [], "deadlineConflictIds": [], "breakCount": 1 }
+    }
+  ]
+}

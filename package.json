@@ -9,7 +9,9 @@
     "type-check": "tsc --noEmit",
     "test": "vitest --run",
     "evaluate:ai": "node scripts/evaluate-ai.mjs",
-    "evaluate:priority": "node scripts/evaluate-ai.mjs --prioritization-only"
+    "evaluate:priority": "node scripts/evaluate-ai.mjs --prioritization-only",
+    "evaluate:phase2": "vitest --run tests/phase2-evaluation.test.ts",
+    "evaluate": "npm run evaluate:priority && npm run evaluate:phase2"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",
