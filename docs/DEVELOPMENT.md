@@ -1,253 +1,129 @@
 # LifeOS Development Guide
 
-## 1. Prerequisites
+LifeOS is an existing Next.js App Router application using TypeScript, MongoDB/Mongoose, Auth.js credentials authentication, and optional OpenAI or Google Gemini APIs. Route handlers use the Web `Request` and `Response` APIs documented by the installed Next.js version.
 
-Before starting implementation, make sure the following are installed on the development machine:
+## Prerequisites and local setup
 
-- Node.js 20 LTS or newer
-- npm 10+
-- Git
-- MongoDB local server or MongoDB Atlas access
-- A code editor such as VS Code
-- Optional: an AI provider key for OpenAI or another supported provider
+- Node.js 20 or newer and npm 10 or newer
+- MongoDB local instance or Atlas cluster
+- Optional OpenAI or Google Gemini API key for provider-backed recommendations
 
-## 2. Recommended project bootstrap for an empty workspace
-
-Because the workspace is currently empty, the minimal initialization command is:
-
-```bash
-npx create-next-app@latest . --ts --tailwind --eslint --app --use-npm --yes
-```
-
-If the user wants to avoid the default src directory, this is the simplest clean option. If the project should use a custom `src` directory, add `--src-dir` to the command.
-
-After the app is created, install the product dependencies specific to the planned architecture, including:
-
-```bash
-npm install mongoose zod bcryptjs next-auth react-hook-form @hookform/resolvers date-fns recharts lucide-react
-npm install -D vitest @vitest/coverage-v8 playwright eslint @types/node @types/react @types/react-dom
-```
-
-The exact package selection can be refined after the project is initialized based on the generated Next.js version and official compatibility checks.
-
-## 3. Environment variables
-
-Create `.env.local` from the example. In PowerShell:
+Install dependencies and create local configuration:
 
 ```powershell
+npm ci
 Copy-Item .env.example .env.local
 ```
 
-Generate a local Auth.js secret, then put that value in both `AUTH_SECRET` and `NEXTAUTH_SECRET` in `.env.local`:
-
-```powershell
-node -p "require('node:crypto').randomBytes(32).toString('base64url')"
-```
-
-Keep the generated value and MongoDB credentials in `.env.local` only. `.gitignore` excludes it; never commit it or send it in chat.
-
-Example required values:
+Set local values in `.env.local` (never commit this file). Required application/database settings are:
 
 ```env
-AUTH_SECRET=use-the-generated-local-secret
-NEXTAUTH_SECRET=use-the-same-generated-local-secret
+AUTH_SECRET=replace-with-a-random-secret-at-least-32-characters
+NEXTAUTH_SECRET=use-the-same-stable-secret
 AUTH_URL=http://localhost:3000
 NEXTAUTH_URL=http://localhost:3000
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 MONGODB_URI=mongodb://127.0.0.1:27017/lifeos
 MONGODB_DB_NAME=lifeos
-NEXT_PUBLIC_APP_URL=http://localhost:3000
-AI_PROVIDER=openai
-AI_MODEL=gpt-4o-mini
-OPENAI_API_KEY=replace-with-your-openai-key
 ```
 
-OpenAI remains the default provider. Its server-side key is `OPENAI_API_KEY`; `AI_MODEL` defaults to `gpt-4o-mini`. Never use a `NEXT_PUBLIC_` name for provider keys. Restart the development server after changing provider settings. If the selected provider's key is absent, extraction returns a setup message instead of fabricated results.
+Use one stable Auth.js secret for local sessions and a separately managed stable secret per deployed environment. Do not rotate it casually; existing sessions depend on it. Generate a secret locally with `node -p "require('node:crypto').randomBytes(32).toString('base64url')"`.
 
-### Google Gemini free-tier alternative
+The supported optional AI settings are `AI_PROVIDER` (`openai` or `google`), `AI_MODEL` and `OPENAI_API_KEY` for OpenAI, or `GEMINI_MODEL` and `GOOGLE_API_KEY` for Gemini. The defaults are OpenAI and `gpt-4o-mini`; Gemini defaults to the configured model in the service. Keys are read on the server only and must not use a `NEXT_PUBLIC_` prefix. Without the selected provider's key, baseline prioritization and non-AI features remain available, while AI calls return a configuration error. Restart the server after changing environment variables.
 
-Google currently lists Gemini 2.5 Flash Lite text input and output as free of charge on the Gemini Developer API Free tier. The free tier has limited, changeable request quotas and Google's terms say free-tier content may be used to improve its products. Do not submit sensitive task descriptions through this provider. Check Google's [current pricing and limits](https://ai.google.dev/gemini-api/docs/pricing) before use.
+## Architecture and data boundaries
 
-1. Sign in to [Google AI Studio](https://aistudio.google.com/), open [API Keys](https://aistudio.google.com/apikey), and create a key for a project with Gemini API access. New keys may be authorization keys; use the key AI Studio creates, and keep it private.
-2. Add these settings to the repository-root `.env.local`, replacing the key placeholder with your Google AI Studio key:
-
-```env
-AI_PROVIDER=google
-GOOGLE_API_KEY=replace-with-your-google-ai-studio-key
-GEMINI_MODEL=gemini-3.5-flash-lite
+```mermaid
+flowchart LR
+  Browser[Browser UI] -->|Auth.js session| Routes[Next.js App Router]
+  Routes --> Auth[Session and user lookup]
+  Routes -->|owner-scoped queries| Mongo[(MongoDB / Mongoose)]
+  Routes --> Extract[AI task extraction]
+  Routes --> Rules[Rules-based priority baseline]
+  Routes -. optional, explicit .-> Provider[OpenAI or Gemini]
+  Extract -->|strict Zod validation| Proposals[Reviewable proposals]
+  Proposals -->|user explicitly saves| Mongo
+  Rules --> Suggestions[Recommendations only]
+  Provider -->|validated, no auto-save| Suggestions
 ```
 
-3. Restart `npm run dev`. To switch back to OpenAI, set `AI_PROVIDER=openai`; `OPENAI_API_KEY` and `AI_MODEL` remain the OpenAI configuration.
+- `models/` contains Mongoose models; `lib/db/connect.ts` caches the connection/promise for server processes.
+- `lib/auth/` implements Auth.js session and persisted-user lookup. Sensitive task and journal queries include the authenticated user's `userId`.
+- `app/api/` contains authenticated route handlers. Input and model output are validated before use.
+- AI extraction returns proposals; it does not create tasks. The UI requires review and explicit save.
+- Task prioritization returns baseline suggestions and optionally an LLM comparison. Neither result changes stored task priorities; user approval and a separate task update are required.
+- The current Task schema has no effort field. Prioritization therefore uses only selected priority, due date, and status; it does not infer effort.
 
-Gemini uses the server-side `x-goog-api-key` header and the `generateContent` structured JSON response format. The key is never sent to the browser. Responses are validated with the same Zod schema before proposals are shown.
+## MongoDB setup and network access
 
-## 4. Database setup
+For local MongoDB, run the database service and use the URI and database name shown in the example above.
 
-### Local MongoDB
+For Atlas, create a database user with only the permissions the application needs and set `MONGODB_URI` and `MONGODB_DB_NAME` in the environment. The current Atlas project has a broad network-access rule. Treat that as a development convenience, not a production configuration: replace it with the deployed application's fixed outbound IP/CIDR (or the provider's private networking option), remove broad entries, and verify connectivity before release. This repository does not change Atlas infrastructure automatically.
 
-- Install MongoDB Community Edition or run a local MongoDB container, and start the MongoDB service on `127.0.0.1:27017`.
-- Use `MONGODB_URI=mongodb://127.0.0.1:27017/lifeos` and `MONGODB_DB_NAME=lifeos` in `.env.local`. The connection utility explicitly selects `MONGODB_DB_NAME`, so keep the URI database path and setting consistent.
-- Restart `npm run dev` after changing environment values.
+On the affected Windows development environment, `npm run dev` preloads `dns-preload.cjs`, which configures the Node DNS resolver to use `8.8.8.8` for the Next.js development process and its child processes. This workaround is limited to the development script. `npm run build` and `npm run start` do not load it; production DNS must be configured in the deployment environment. Review the preload if the local DNS issue is resolved or the development network changes.
 
-### MongoDB Atlas
+## Development and quality checks
 
-1. Sign in to MongoDB Atlas and create a project and a free cluster.
-2. Under **Database Access**, create a database user and grant it read/write access to the `lifeos` database. This database user's password is separate from your Atlas website password.
-3. Under **Network Access**, add your current development IP address.
-4. Open the cluster's **Connect** flow, choose **Drivers** and **Node.js**, then copy the connection string.
-5. In your local `.env.local`, replace the URI placeholders with the database username, URL-encoded database password, and cluster host. Keep `/lifeos` as the database path and set `MONGODB_DB_NAME=lifeos`:
-
-```env
-MONGODB_URI=mongodb+srv://<database-user>:<url-encoded-password>@<cluster-host>/lifeos?retryWrites=true&w=majority
-MONGODB_DB_NAME=lifeos
-```
-
-6. Save `.env.local`, restart `npm run dev`, then try registration in the app. Never put the real Atlas URI in `.env.example`, source code, or chat. If the database password contains symbols, URL-encode them before placing it in the URI.
-
-## 5. Startup commands
-
-Once the project is initialized and dependencies are installed, the expected scripts are:
-
-```bash
+```powershell
 npm run dev
-npm run build
-npm run start
-npm run lint
+npm test
 npm run type-check
-npm run test
+npm run lint
+npm run build
 ```
 
-The project should also include a focused Playwright smoke flow for the critical registration, login, and protected dashboard route.
+The automated tests use mocked providers and database models; they do not require MongoDB, network access, or paid AI calls. They verify selected API, validation, ownership, and service behavior, but are not proof of live Atlas persistence, real authentication deployment, or provider availability. No browser automation suite or live-service integration suite is currently part of `npm test`.
 
-## 6. Quality gates
+## AI extraction evaluation
 
-Before moving to Phase 1, the project should satisfy these conditions:
+`data/evaluation/task-extraction-synthetic.json` contains 50 synthetic notes with expected outputs, including multiple tasks, date/no-date cases, priorities, irrelevant text, and ambiguous dates. It contains no user content. Run:
 
-- TypeScript strict mode is enabled.
-- Route handlers validate input and authenticate sessions.
-- Task ownership checks exist in all sensitive operations.
-- Passwords are hashed and never stored in plaintext.
-- AI endpoints fail gracefully when the provider is not configured.
-- `.gitignore` excludes `.env*` files, including `.env.local`.
-- Tests cover critical validation and authorization behavior.
+```powershell
+npm run evaluate:ai -- --template data/evaluation/my-predictions.json
+npm run evaluate:ai -- --predictions data/evaluation/my-predictions.json
+```
 
-## 7. Testing strategy
+The template is intentionally incomplete. Fill `referenceDate` and every `taskPredictions` entry with an observed HTTP `status` and `proposals` (or `null` for rejected requests) before evaluating. A successful proposal has exactly `title`, `priority`, and `dueDate`; the date is `YYYY-MM-DD` or `null`. The evaluator resolves `$today`, `$tomorrow`, and `$in_N_days` against the supplied reference date.
 
-### Unit tests
+Metric definitions:
 
-Focus on:
+- **Task precision:** exact normalized title matches divided by all predicted tasks. Normalization lowercases, applies Unicode normalization, and collapses punctuation/whitespace; it does not score semantic synonyms.
+- **Task recall:** exact normalized title matches divided by expected tasks.
+- **Date extraction accuracy:** expected tasks with a title match and exact expected date divided by all expected tasks. Missing tasks count as date misses.
+- **Schema-valid output rate:** successful expected cases whose prediction is HTTP 200 and whose proposal array conforms to the strict output shape divided by all expected-success cases.
+- **Failure rate:** expected-success cases returning a non-200 status divided by all expected-success cases. A malformed HTTP-200 response is reflected in schema-valid rate, not this transport/provider failure rate.
+- **Expected status accuracy:** cases whose observed status matches the dataset's expected status divided by all cases.
 
-- Zod validation schema behavior
-- password hashing and matching
-- task ownership logic
-- date parsing and timezone interpretation
-- AI output parsing and validation
+The evaluator reports measured results from the supplied file; it does not generate or assume model scores. A perfect metric from a file populated directly from the expected labels is only a test of the evaluator, not evidence of model performance. Keep model outputs and reference date with evaluation results for reproducibility.
 
-### Integration tests
+## Task-prioritization experiment
 
-Focus on:
+`data/evaluation/task-prioritization-synthetic.json` contains 50 synthetic cases with manually authored suggested-priority labels, selected priority, status, and days-to-deadline. Some labels intentionally differ from the rules at deadline boundaries. The rules baseline is explicit: importance scores are low=1, medium=2, high=3; deadlines overdue through tomorrow add 3, within 3 days add 2, within 7 days add 1; totals map to high at 3+, medium at 2, otherwise low. Completed tasks retain selected priority. These are recommendation heuristics, not a trained model.
 
-- registration flow
-- login/logout flow
-- task CRUD access with valid and invalid ownership
-- journal entry creation and retrieval
+Run the deterministic baseline benchmark without a provider key:
 
-The current automated suite contains database-independent auth validation/password-hash tests and mocked task-route tests for authentication and owner-scoped CRUD queries. Those mocked tests do not connect to MongoDB. Real database integration tests are still needed to verify task persistence and cross-user denial against MongoDB, along with registration persisting a bcrypt hash (not the submitted password), duplicate registration returning `409` including the unique-index race, valid/invalid credential login, logout clearing the Auth.js session, and persisted-user lookup. Do not treat the unit suite as proof of these database-backed flows.
+```powershell
+npm run evaluate:priority
+```
 
-AI extraction tests use mocked provider calls to validate structured proposal parsing, malformed output, missing-key handling, authentication and input validation, provider selection, structured request construction, provider error mapping, and date grounding. Unsupported or ambiguous dates are withheld; explicit written dates and unambiguous relative dates are retained. The tests do not call OpenAI or Gemini. To manually verify live extraction, configure the selected provider's key locally, sign in, open **Tasks**, extract proposals, review/edit/select them, then confirm saving. The tests do not prove that a live provider key, account, model, free-tier quota, or network request works.
+This reports classification accuracy, macro-F1, and a confusion matrix against the authored labels. To compare LLM recommendations, add a `priorityRecommendations` array to a completed extraction predictions JSON. Each row is `{ "id": "priority-001", "priority": "low" }`; partial valid predictions are scored over supplied IDs only. Run the same `evaluate:ai -- --predictions ...` command. The comparison is synthetic and small; it is not evidence of real-world utility.
 
-### Browser smoke tests
+The authenticated `POST /api/ai/prioritize-tasks` route accepts `{ "taskIds": ["<owned-task-id>"], "includeLLM": false }`. It returns `{ "baseline": [...], "recommendations": [] }` without provider access by default. Set `includeLLM: true` for optional structured provider suggestions. IDs are validated and loaded only for the current user. There is no UI wired to this endpoint yet.
 
-Cover:
+## Privacy, security, and operations
 
-- login page rendering
-- registration success path
-- protected dashboard route redirect behavior
-- task form flow
+- Keep `AUTH_SECRET`, MongoDB URIs/passwords, and AI API keys in local/deployment secret storage only. Do not log or expose them in client bundles, source, screenshots, or support messages.
+- AI metrics log operation/provider, outcome, elapsed time, schema-validation failure counts, cumulative process-local counters, and token counts when supplied by the provider. Inputs, outputs, task IDs, journal contents, and credentials are not included. These in-memory counters reset when a process restarts and are not a durable monitoring system.
+- Provider content may be processed by the configured provider. Avoid sending confidential personal, health, financial, or journal content. Extraction currently accepts task notes only.
+- Extraction validates a bounded JSON request and a strict model-output schema, uses a timeout, and strips dates unsupported by explicit or unambiguous date text. Ambiguous dates remain null; date extraction is still probabilistic and should be reviewed before saving.
+- LLM prioritization is optional, schema-validated, time-bounded, and advisory. No provider retries are performed; this avoids unexpected repeat calls. Do not treat model explanations as facts beyond the supplied task fields.
+- Use TLS for deployed traffic, least-privilege database users, restricted Atlas network access, stable secrets, and provider-side quota/usage controls.
 
-## 8. Troubleshooting
+## Deployment checklist
 
-### MongoDB connection fails
-
-- verify the connection string
-- confirm the database service is running
-- verify the Atlas network access settings if using Atlas
-
-### Authentication fails
-
-- ensure `AUTH_SECRET` is set and long enough
-- verify the credentials provider is configured correctly
-- inspect cookies and session routing in the App Router
-
-### AI endpoints fail
-
-- confirm the provider key is present in `.env.local`
-- check the selected provider is supported by the official SDK
-- verify the request contract and provider authentication
-
-### Type errors appear
-
-- confirm TypeScript strict mode is enabled
-- avoid blanket `any` usage in new code
-- fix validation and service-layer mismatches before moving on
-
-## 9. Documentation and implementation order
-
-The repository should proceed in the requested order:
-
-1. Phase 0: architecture and documentation foundation
-2. Phase 1: application core and protected task workflow
-3. Phase 2: AI features and confirmation flows
-4. Phase 3: analytics, polish, and final verification
-
-This order keeps the app coherent and ensures every feature is built on a verified foundation rather than a brittle prototype.
-
-## 10. Phase checklist with acceptance criteria
-
-### Phase 1 — Working core
-
-Checklist:
-
-- initialize the Next.js project and install the required dependencies
-- configure TypeScript, Tailwind, environment validation, and MongoDB connectivity
-- set up Auth.js with a credentials provider and secure session behavior
-- build protected layouts and dashboard shell
-- implement task CRUD with user-scoped ownership checks
-- provide task calendar and list views tied to real data
-
-Acceptance criteria:
-
-- users can register, log in, and access protected pages only when authenticated
-- task CRUD works for a single authenticated user and denies cross-user access
-- the app runs locally without AI configuration and still serves core features
-
-### Phase 2 — AI features
-
-Checklist:
-
-- add provider abstraction and environment-based configuration
-- implement AI task extraction with review and confirmation flow
-- implement journal entry creation and mood analysis
-- add task breakdown and daily planning suggestions
-- validate provider output with Zod before save or display
-
-Acceptance criteria:
-
-- AI endpoints return actionable configuration errors when no API key exists
-- proposed tasks are reviewable and editable before creation
-- journal analysis is clearly marked as approximate and not medical advice
-
-### Phase 3 — Analytics and quality
-
-Checklist:
-
-- implement authenticated analytics queries
-- display tasks over time, completion rate, category and priority distributions, and mood history
-- add responsive polish, error states, and empty states
-- run unit, integration, and browser-level tests
-- complete production build validation and final documentation
-
-Acceptance criteria:
-
-- analytics are scoped to the current user only
-- the app builds cleanly and tests pass without runtime-critical failures
-- the application is ready for local demonstration and portfolio presentation
+1. Use a supported Node.js runtime and install the lockfile with `npm ci`.
+2. Configure stable `AUTH_SECRET`/`NEXTAUTH_SECRET`, correct public/auth URLs, MongoDB credentials/database name, and only the optional server-side AI keys needed.
+3. Restrict Atlas network access to the production application network; verify the database user is least privilege.
+4. Run `npm test`, `npm run type-check`, `npm run lint`, and `npm run build`.
+5. Deploy the production build with `npm run start` or the platform's documented Next.js production adapter. Do not apply the development DNS preload to production.
+6. Verify login, user-scoped task/journal operations, task proposal review/save, baseline recommendations, and provider-backed features (if enabled) in the deployed environment. Tests in this repository do not replace these manual checks.

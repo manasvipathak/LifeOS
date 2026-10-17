@@ -73,9 +73,9 @@ describe('AI task extraction', () => {
     expect(body.error.message).toContain('OPENAI_API_KEY');
   });
 
-  it('returns mapped provider errors and logs only safe diagnostics', async () => {
+  it('returns mapped provider errors without logging request or provider content', async () => {
     const userText = 'private description that must not be logged';
-    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'info').mockImplementation(() => {});
     mocks.extractTaskProposals.mockRejectedValue(new OpenAIAPIError({
       status: 429,
       code: 'insufficient_quota',
@@ -90,7 +90,7 @@ describe('AI task extraction', () => {
     expect(response.status).toBe(429);
     expect(body.error.code).toBe('AI_QUOTA_EXCEEDED');
     expect(body.error.message).toContain('billing');
-    expect(logged).toContain('insufficient_quota');
+    expect(log).not.toHaveBeenCalled();
     expect(logged).not.toContain(userText);
   });
 
@@ -104,13 +104,21 @@ describe('AI task extraction', () => {
   });
 
   it('rejects empty, oversized, or owner-bearing input', async () => {
+    const malformedResponse = await POST(new Request('http://localhost/api/ai/extract-tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{malformed',
+    }));
     const emptyResponse = await POST(request({ text: '   ' }));
     const ownerResponse = await POST(request({ text: 'Prepare notes', userId: '64b000000000000000000002' }));
     const longResponse = await POST(request({ text: 'a'.repeat(6001) }));
+    const oversizedBodyResponse = await POST(request({ text: 'a'.repeat(33_000) }));
 
+    expect(malformedResponse.status).toBe(400);
     expect(emptyResponse.status).toBe(400);
     expect(ownerResponse.status).toBe(400);
     expect(longResponse.status).toBe(400);
+    expect(oversizedBodyResponse.status).toBe(413);
     expect(mocks.extractTaskProposals).not.toHaveBeenCalled();
   });
 

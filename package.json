@@ -7,7 +7,9 @@
     "start": "next start",
     "lint": "eslint .",
     "type-check": "tsc --noEmit",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "evaluate:ai": "node scripts/evaluate-ai.mjs",
+    "evaluate:priority": "node scripts/evaluate-ai.mjs --prioritization-only"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.9.1",

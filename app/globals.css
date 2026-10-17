@@ -47,3 +47,43 @@ body {
     @apply inline-flex items-center justify-center rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:ring-offset-2;
   }
 }
+
+html[data-theme='dark'] .dashboard-theme {
+  background: #020617;
+  color: #e2e8f0;
+  color-scheme: dark;
+}
+
+html[data-theme='dark'] .dashboard-theme [class~='bg-white'],
+html[data-theme='dark'] .dashboard-theme [class~='bg-white/80'],
+html[data-theme='dark'] .dashboard-theme [class~='bg-white/90'] {
+  background-color: #0f172a;
+}
+
+html[data-theme='dark'] .dashboard-theme [class~='bg-slate-50'],
+html[data-theme='dark'] .dashboard-theme [class~='bg-slate-100'] {
+  background-color: #1e293b;
+}
+
+html[data-theme='dark'] .dashboard-theme [class~='border-slate-100'],
+html[data-theme='dark'] .dashboard-theme [class~='border-slate-200'],
+html[data-theme='dark'] .dashboard-theme [class~='border-slate-300'] {
+  border-color: #334155;
+}
+
+html[data-theme='dark'] .dashboard-theme [class~='text-slate-900'],
+html[data-theme='dark'] .dashboard-theme [class~='text-slate-800'],
+html[data-theme='dark'] .dashboard-theme [class~='text-slate-700'] {
+  color: #e2e8f0;
+}
+
+html[data-theme='dark'] .dashboard-theme [class~='text-slate-600'],
+html[data-theme='dark'] .dashboard-theme [class~='text-slate-500'] {
+  color: #94a3b8;
+}
+
+html[data-theme='dark'] .dashboard-theme input,
+html[data-theme='dark'] .dashboard-theme textarea,
+html[data-theme='dark'] .dashboard-theme select {
+  color-scheme: dark;
+}

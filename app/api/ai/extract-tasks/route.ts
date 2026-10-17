@@ -1,7 +1,8 @@
 import { NextResponse } from 'next/server';
 import { getCurrentUser } from '@/lib/auth/session';
-import { AIConfigurationError, AIProviderAPIError, AIResponseError, extractTaskProposals, mapAIProviderError } from '@/lib/ai/task-extraction';
+import { AIConfigurationError, AIProviderAPIError, AIProviderTimeoutError, AIResponseError, extractTaskProposals, mapAIProviderError } from '@/lib/ai/task-extraction';
 import { taskExtractionInputSchema } from '@/lib/validations/task-extraction';
+import { MAX_JSON_REQUEST_BYTES, parseJsonRequest } from '@/lib/http/parse-json-request';
 
 export async function POST(request: Request) {
   const user = await getCurrentUser();
@@ -10,14 +11,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: { code: 'UNAUTHENTICATED', message: 'Authentication is required.' } }, { status: 401 });
   }
 
-  let body: unknown;
-  try {
-    body = await request.json();
-  } catch {
+  const body = await parseJsonRequest(request, MAX_JSON_REQUEST_BYTES);
+  if (!body.success && body.reason === 'too_large') {
+    return NextResponse.json({ error: { code: 'INVALID_INPUT', message: 'Request body must be 32 KiB or smaller.' } }, { status: 413 });
+  }
+  if (!body.success) {
     return NextResponse.json({ error: { code: 'INVALID_INPUT', message: 'Request body must be valid JSON.' } }, { status: 400 });
   }
 
-  const parsed = taskExtractionInputSchema.safeParse(body);
+  const parsed = taskExtractionInputSchema.safeParse(body.value);
   if (!parsed.success) {
     return NextResponse.json({ error: { code: 'INVALID_INPUT', message: parsed.error.issues[0]?.message ?? 'Task description is invalid.' } }, { status: 400 });
   }
@@ -30,23 +32,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: { code: 'AI_NOT_CONFIGURED', message: error.message } }, { status: 503 });
     }
 
+    if (error instanceof AIProviderTimeoutError) {
+      return NextResponse.json({ error: { code: 'AI_TIMEOUT', message: error.message } }, { status: 504 });
+    }
+
     if (error instanceof AIProviderAPIError) {
       const mapped = mapAIProviderError(error);
-      console.error('[ai-task-extraction] AI provider request failed', {
-        provider: error.provider,
-        model: error.model,
-        status: error.status,
-        code: error.code,
-        type: error.type,
-        message: error.providerMessage,
-        cause: {
-          status: error.status,
-          code: error.code,
-          type: error.type,
-          message: error.providerMessage,
-        },
-      });
-
       return NextResponse.json({ error: { code: mapped.code, message: mapped.message } }, { status: mapped.status });
     }
 

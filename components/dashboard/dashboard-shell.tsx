@@ -29,7 +29,7 @@ export function DashboardShell({
   const pathname = usePathname();
 
   return (
-    <div className="min-h-screen bg-slate-100">
+    <div className="dashboard-theme min-h-screen bg-slate-100">
       <div className="flex min-h-screen flex-col lg:flex-row">
         <aside className="w-full border-b border-slate-200 bg-slate-950 text-slate-100 lg:w-72 lg:border-b-0 lg:border-r">
           <div className="flex items-center justify-between px-6 py-5">

@@ -2,6 +2,7 @@
 
 import {
   extractTaskProposals,
+  AIProviderTimeoutError,
   AIResponseError,
   GoogleGeminiAPIError,
   mapGoogleGeminiError,
@@ -58,6 +59,35 @@ describe('OpenAI provider error handling', () => {
     await expect(extractTaskProposals('Draft the proposal', 'UTC')).rejects.toBeInstanceOf(AIResponseError);
   });
 
+  it('times out the provider request without retrying', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('Timed out', 'TimeoutError'));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(extractTaskProposals('Draft the proposal', 'UTC')).rejects.toBeInstanceOf(AIProviderTimeoutError);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('records operational metrics without logging private task text', async () => {
+    const privateText = 'private-task-text-marker-82e11';
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({ tasks: [] }) } }],
+      usage: { prompt_tokens: 8, completion_tokens: 2 },
+    }), { status: 200 })));
+    const info = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    await extractTaskProposals(privateText, 'UTC');
+
+    const serializedMetrics = JSON.stringify(info.mock.calls);
+    expect(serializedMetrics).toContain('task_extraction');
+    expect(serializedMetrics).toContain('inputTokens');
+    expect(serializedMetrics).not.toContain(privateText);
+  });
+
   it('resolves a supported relative date and drops ambiguous numeric dates', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-10-17T12:00:00.000Z'));
@@ -90,6 +120,43 @@ describe('OpenAI provider error handling', () => {
     expect(ambiguous[0].dueDate).toBeNull();
     expect(explicit[0].dueDate).toBe('2026-11-02');
     expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('withholds a weekday date when the note explicitly says it is ambiguous', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-10-17T12:00:00.000Z'));
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubEnv('AI_MODEL', 'gpt-4o-mini');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        tasks: [{ title: 'Call plumber', priority: 'medium', dueDate: '2026-10-19' }],
+      }) } }],
+    }), { status: 200 })));
+
+    const proposals = await extractTaskProposals(
+      'Call the plumber on Monday, but I do not know which Monday I meant.',
+      'UTC',
+    );
+
+    expect(proposals[0].dueDate).toBeNull();
+  });
+
+  it('withholds an explicit-looking date when the note says it is uncertain', async () => {
+    vi.stubEnv('AI_PROVIDER', 'openai');
+    vi.stubEnv('OPENAI_API_KEY', 'openai-test-key');
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: JSON.stringify({
+        tasks: [{ title: 'Schedule review', priority: 'medium', dueDate: '2026-11-02' }],
+      }) } }],
+    }), { status: 200 })));
+
+    const proposals = await extractTaskProposals(
+      'Maybe schedule the review on November 2, 2026; I am not sure that is the date.',
+      'UTC',
+    );
+
+    expect(proposals[0].dueDate).toBeNull();
   });
 
   it.each([

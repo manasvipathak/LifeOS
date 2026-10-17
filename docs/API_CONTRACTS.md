@@ -170,7 +170,27 @@
 - Authentication: required
 - Behavior: delete only if document belongs to current user
 
-## 4. Mood tracking
+## 4. Profile settings
+
+### Read current profile
+
+- Method: `GET`
+- Route: `/api/settings/profile`
+- Authentication: required
+- Response: `{ profile: { name, email, timezone } }`
+- Only fields safe to show in Settings are returned; credentials and password hashes are never included.
+
+### Update current profile
+
+- Method: `PATCH`
+- Route: `/api/settings/profile`
+- Authentication: required
+- Request body: `{ name: string; timezone: string }`
+- Editable fields are limited to the existing User schema's `name` and `timezone`. Name and IANA timezone are validated on the server. The email is read-only, and unknown fields are rejected.
+- The update query matches the authenticated user's database ID; settings cannot be read or changed for another user.
+- Theme preference is stored in the current browser's local storage and is not sent to the server.
+
+## 5. Mood tracking
 
 ### List recent mood entries
 
@@ -197,7 +217,7 @@
 - Behavior: validate the mood and note, derive `userId` from the verified session, and assign timestamps server-side.
 - Error statuses: `400` invalid input, `401` unauthenticated, `500` unexpected server issue.
 
-## 5. AI task extraction
+## 6. AI task extraction
 
 ### Extract tasks from text
 
@@ -208,9 +228,7 @@
 
 ```ts
 {
-  text: string;
-  timezone?: string;
-  currentDate?: string;
+  text: string; // trimmed, 1–6,000 characters; no additional properties
 }
 ```
 
@@ -218,31 +236,66 @@
 
 ```ts
 {
-  tasks: Array<{
+  proposals: Array<{
     title: string;
-    description?: string;
-    dueDate?: string;
-    dueTime?: string;
-    priority?: 'low' | 'medium' | 'high';
-    category?: string;
-    suggestedSubtasks?: string[];
-    ambiguity?: string;
+    priority: 'low' | 'medium' | 'high';
+    dueDate: string | null; // YYYY-MM-DD when supported; otherwise null
   }>;
 }
 ```
 
 - Validation:
-  - ambiguous date/time wording must be surfaced as an explicit ambiguity value
-  - no silent invention of dates or times
+  - request JSON is limited to 32 KiB
+  - at most 20 strict task proposals are returned
+  - ambiguous or unsupported dates are withheld as `null`
   - provider output must conform to the Zod schema before the UI displays it
+  - extraction does not persist tasks; the user reviews and explicitly saves proposals
 
 - Error statuses:
-  - 400: invalid text or malformed request
+  - 400: malformed JSON or invalid input
   - 401: no authenticated session
-  - 422: provider output invalid
-  - 500: AI provider unavailable
+  - 413: request body exceeds 32 KiB
+  - 429: provider quota or rate limit, where mapped
+  - 502: malformed provider output or provider request failure
+  - 503: missing AI configuration or provider temporarily unavailable
+  - 504: provider timeout
 
-## 6. AI task breakdown
+### Task-priority recommendations
+
+- Method: `POST`
+- Route: `/api/ai/prioritize-tasks`
+- Authentication: required
+- Request body:
+
+```ts
+{
+  taskIds: string[]; // 1–50 unique MongoDB ObjectId strings for tasks owned by the user
+  includeLLM?: boolean; // defaults to false; true requests an additional provider suggestion
+}
+```
+
+- Response:
+
+```ts
+{
+  baseline: Array<{
+    taskId: string;
+    priority: 'low' | 'medium' | 'high';
+    explanation: string;
+    score: number;
+  }>;
+  recommendations: Array<{
+    taskId: string;
+    priority: 'low' | 'medium' | 'high';
+    explanation: string;
+  }>; // empty unless includeLLM is true
+}
+```
+
+- Only owner-scoped task fields (selected priority, deadline, and status) are used; titles and descriptions are not sent to the provider.
+- Recommendations are advisory and are never saved automatically.
+
+## 7. AI task breakdown
 
 ### Break down an existing task
 
@@ -273,7 +326,7 @@
   - confirm the task belongs to the current user before calling the provider
   - show tasks for review before persisting
 
-## 6. AI daily planning
+## 8. AI daily planning
 
 ### Suggest daily plan
 
@@ -306,7 +359,7 @@
   - suggestions are generated from the user’s incomplete tasks and deadlines
   - the UI must clearly distinguish a suggestion from a saved schedule change
 
-## 7. Journal endpoints
+## 9. Journal endpoints
 
 ### Create journal entry
 
@@ -385,7 +438,7 @@
   - uses the submitted text only
   - clear uncertainty messaging is required
 
-## 8. Analytics endpoints
+## 10. Analytics endpoints
 
 ### Productivity analytics
 
@@ -423,25 +476,7 @@
   - handles empty collections gracefully
   - avoids causal language in mood-productivity comparisons
 
-## 9. User settings endpoints
-
-### Update user settings
-
-- Method: `PATCH`
-- Route: `/api/settings`
-- Authentication: required
-- Request body:
-
-```ts
-{
-  timezone?: string;
-  name?: string;
-}
-```
-
-- Response: updated user settings
-
-## 10. Error conventions
+## 11. Error conventions
 
 Use a common wrapper like this in API responses:
 
